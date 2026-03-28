@@ -15,6 +15,7 @@ const BULLET_LIFETIME = 2; // seconds
 const MAX_CLONES = 5;
 const ATTACK_COOLDOWN = 0.5; // seconds
 const CLONE_SEARCH_SPEED = 140;
+const ENTITY_RADIUS = 10;
 
 // Game state
 let player = {
@@ -50,9 +51,9 @@ let hazards = [
     {x: 550, y: 50, radius: 12, type: 'moving', vx: 0, vy: 30, minY: 50, maxY: 250}
 ];
 let walls = [
-    {x: 350, y: 250, w: 100, h: 20},
-    {x: 250, y: 350, w: 20, h: 100},
-    {x: 550, y: 150, w: 20, h: 100}
+    {x: 350, y: 250, w: 100, h: 20, type: 'moving', vx: 70, vy: 0, minX: 260, maxX: 440},
+    {x: 250, y: 350, w: 20, h: 100, type: 'moving', vx: 0, vy: -60, minY: 260, maxY: 420},
+    {x: 550, y: 150, w: 20, h: 100, type: 'moving', vx: 0, vy: 80, minY: 120, maxY: 260}
 ];
 let respawnPoints = [
     {x: 100, y: 100},
@@ -100,6 +101,105 @@ function collidesWithWall(entityX, entityY, radius = 10) {
     ));
 }
 
+function resolveWallCollision(entity, radius = 10) {
+    walls.forEach(wall => {
+        const overlapsWall = (
+            entity.x + radius > wall.x &&
+            entity.x - radius < wall.x + wall.w &&
+            entity.y + radius > wall.y &&
+            entity.y - radius < wall.y + wall.h
+        );
+
+        if (!overlapsWall) {
+            return;
+        }
+
+        const pushLeft = entity.x + radius - wall.x;
+        const pushRight = wall.x + wall.w - (entity.x - radius);
+        const pushUp = entity.y + radius - wall.y;
+        const pushDown = wall.y + wall.h - (entity.y - radius);
+        const smallestPush = Math.min(pushLeft, pushRight, pushUp, pushDown);
+
+        if (smallestPush === pushLeft) {
+            entity.x = wall.x - radius;
+        } else if (smallestPush === pushRight) {
+            entity.x = wall.x + wall.w + radius;
+        } else if (smallestPush === pushUp) {
+            entity.y = wall.y - radius;
+        } else {
+            entity.y = wall.y + wall.h + radius;
+        }
+    });
+}
+
+function moveWithinBounds(position, velocity, min, max, deltaTime) {
+    if (velocity === 0 || min === undefined || max === undefined) {
+        return {position, velocity};
+    }
+
+    let nextPosition = position + velocity * deltaTime;
+    let nextVelocity = velocity;
+
+    while (nextPosition < min || nextPosition > max) {
+        if (nextPosition < min) {
+            nextPosition = min + (min - nextPosition);
+            nextVelocity = Math.abs(nextVelocity);
+        } else {
+            nextPosition = max - (nextPosition - max);
+            nextVelocity = -Math.abs(nextVelocity);
+        }
+    }
+
+    return {
+        position: nextPosition,
+        velocity: nextVelocity
+    };
+}
+
+function separateClones() {
+    const minimumDistance = ENTITY_RADIUS * 2;
+
+    for (let iteration = 0; iteration < 3; iteration++) {
+        for (let i = 0; i < clones.length; i++) {
+            for (let j = i + 1; j < clones.length; j++) {
+                const cloneA = clones[i];
+                const cloneB = clones[j];
+                let dx = cloneB.x - cloneA.x;
+                let dy = cloneB.y - cloneA.y;
+                let dist = Math.hypot(dx, dy);
+
+                if (dist >= minimumDistance) {
+                    continue;
+                }
+
+                if (dist === 0) {
+                    const angle = ((i + j + iteration) / Math.max(clones.length, 1)) * Math.PI * 2;
+                    dx = Math.cos(angle);
+                    dy = Math.sin(angle);
+                    dist = 1;
+                }
+
+                const overlap = (minimumDistance - dist) / 2;
+                const offsetX = (dx / dist) * overlap;
+                const offsetY = (dy / dist) * overlap;
+
+                cloneA.x -= offsetX;
+                cloneA.y -= offsetY;
+                cloneB.x += offsetX;
+                cloneB.y += offsetY;
+
+                cloneA.x = clamp(cloneA.x, ARENA_LEFT, ARENA_RIGHT);
+                cloneA.y = clamp(cloneA.y, ARENA_TOP, ARENA_BOTTOM);
+                cloneB.x = clamp(cloneB.x, ARENA_LEFT, ARENA_RIGHT);
+                cloneB.y = clamp(cloneB.y, ARENA_TOP, ARENA_BOTTOM);
+
+                resolveWallCollision(cloneA, ENTITY_RADIUS);
+                resolveWallCollision(cloneB, ENTITY_RADIUS);
+            }
+        }
+    }
+}
+
 // Update function
 function update(deltaTime) {
     // Handle input
@@ -135,17 +235,22 @@ function update(deltaTime) {
     player.x += player.vx * deltaTime;
     player.y += player.vy * deltaTime;
 
-    // Wall collision for player
+    // Update moving walls before collision resolution.
     walls.forEach(wall => {
-        if (player.x + 10 > wall.x && player.x - 10 < wall.x + wall.w &&
-            player.y + 10 > wall.y && player.y - 10 < wall.y + wall.h) {
-            // Push back
-            if (player.vx > 0) player.x = wall.x - 10;
-            else if (player.vx < 0) player.x = wall.x + wall.w + 10;
-            if (player.vy > 0) player.y = wall.y - 10;
-            else if (player.vy < 0) player.y = wall.y + wall.h + 10;
+        if (wall.type !== 'moving') {
+            return;
         }
+
+        const nextX = moveWithinBounds(wall.x, wall.vx || 0, wall.minX, wall.maxX, deltaTime);
+        const nextY = moveWithinBounds(wall.y, wall.vy || 0, wall.minY, wall.maxY, deltaTime);
+
+        wall.x = nextX.position;
+        wall.vx = nextX.velocity;
+        wall.y = nextY.position;
+        wall.vy = nextY.velocity;
     });
+
+    resolveWallCollision(player, ENTITY_RADIUS);
 
     // Clamp to arena
     player.x = clamp(player.x, ARENA_LEFT, ARENA_RIGHT);
@@ -216,7 +321,10 @@ function update(deltaTime) {
 
         clone.x = clamp(clone.x, ARENA_LEFT, ARENA_RIGHT);
         clone.y = clamp(clone.y, ARENA_TOP, ARENA_BOTTOM);
+        resolveWallCollision(clone, ENTITY_RADIUS);
     });
+
+    separateClones();
 
     // Update bullets
     bullets.forEach((bullet, i) => {
@@ -233,24 +341,19 @@ function update(deltaTime) {
     // Update moving hazards
     hazards.forEach(hazard => {
         if (hazard.type === 'moving') {
-            hazard.x += hazard.vx * deltaTime;
-            hazard.y += hazard.vy * deltaTime;
-            if (hazard.vx !== 0) {
-                if (hazard.x <= hazard.minX || hazard.x >= hazard.maxX) {
-                    hazard.vx = -hazard.vx;
-                }
-            }
-            if (hazard.vy !== 0) {
-                if (hazard.y <= hazard.minY || hazard.y >= hazard.maxY) {
-                    hazard.vy = -hazard.vy;
-                }
-            }
+            const nextX = moveWithinBounds(hazard.x, hazard.vx || 0, hazard.minX, hazard.maxX, deltaTime);
+            const nextY = moveWithinBounds(hazard.y, hazard.vy || 0, hazard.minY, hazard.maxY, deltaTime);
+
+            hazard.x = nextX.position;
+            hazard.vx = nextX.velocity;
+            hazard.y = nextY.position;
+            hazard.vy = nextY.velocity;
         }
     });
 
     // Check collisions
     bullets.forEach((bullet, i) => {
-        if (bullet.owner === 'clone' && distance(bullet, player) < 10) {
+        if (bullet.owner === 'clone' && distance(bullet, player) < ENTITY_RADIUS) {
             // Player takes damage
             player.hp--;
             if (player.hp <= 0) {
@@ -259,7 +362,7 @@ function update(deltaTime) {
             bullets.splice(i, 1);
         } else if (bullet.owner === 'player') {
             clones.forEach((clone, j) => {
-                if (distance(bullet, clone) < 10) {
+                if (distance(bullet, clone) < ENTITY_RADIUS) {
                     // Remove clone
                     clones.splice(j, 1);
                     bullets.splice(i, 1);
@@ -270,7 +373,7 @@ function update(deltaTime) {
 
     // Check clone contact
     clones.forEach(clone => {
-        if (distance(clone, player) < 20) {
+        if (distance(clone, player) < ENTITY_RADIUS * 2) {
             // Player takes damage from contact
             player.hp--;
             if (player.hp <= 0) {
