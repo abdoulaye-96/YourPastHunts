@@ -13,7 +13,9 @@ A fast-paced action survival game based on a time-loop mechanic where you fight 
   - Hit by clone bullets (lose 1 HP)
   - Direct contact with clones (lose 1 HP)
   - Touching environmental hazards (lose 1 HP)
-  - Player has 3 HP total
+  - Player has 2 HP total
+- **Obstacles**: Static and moving hazards, walls that block movement
+- **Respawn System**: Player respawns at alternating safe locations to avoid immediate clone collisions
 
 ## How to Play
 

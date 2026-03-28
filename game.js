@@ -14,6 +14,7 @@ const BULLET_SPEED = 300;
 const BULLET_LIFETIME = 2; // seconds
 const MAX_CLONES = 5;
 const ATTACK_COOLDOWN = 0.5; // seconds
+const CLONE_SEARCH_SPEED = 140;
 
 // Game state
 let player = {
@@ -27,16 +28,39 @@ let player = {
     dashing: false,
     dashTime: 0,
     attackCooldown: 0,
-    hp: 3
+    hp: 2
 };
 
 let clones = [];
 let bullets = [];
 let hazards = [
-    {x: 200, y: 200, radius: 15},
-    {x: 600, y: 300, radius: 15},
-    {x: 400, y: 500, radius: 15}
+    {x: 150, y: 150, radius: 20, type: 'static'},
+    {x: 650, y: 150, radius: 20, type: 'static'},
+    {x: 150, y: 450, radius: 20, type: 'static'},
+    {x: 650, y: 450, radius: 20, type: 'static'},
+    {x: 400, y: 200, radius: 15, type: 'static'},
+    {x: 400, y: 400, radius: 15, type: 'static'},
+    {x: 200, y: 300, radius: 15, type: 'static'},
+    {x: 600, y: 300, radius: 15, type: 'static'},
+    {x: 300, y: 100, radius: 18, type: 'static'},
+    {x: 500, y: 500, radius: 18, type: 'static'},
+    {x: 100, y: 250, radius: 12, type: 'moving', vx: 50, vy: 0, minX: 100, maxX: 300},
+    {x: 700, y: 350, radius: 12, type: 'moving', vx: -50, vy: 0, minX: 500, maxX: 700},
+    {x: 250, y: 550, radius: 12, type: 'moving', vx: 0, vy: -30, minY: 350, maxY: 550},
+    {x: 550, y: 50, radius: 12, type: 'moving', vx: 0, vy: 30, minY: 50, maxY: 250}
 ];
+let walls = [
+    {x: 350, y: 250, w: 100, h: 20},
+    {x: 250, y: 350, w: 20, h: 100},
+    {x: 550, y: 150, w: 20, h: 100}
+];
+let respawnPoints = [
+    {x: 100, y: 100},
+    {x: 700, y: 100},
+    {x: 100, y: 500},
+    {x: 700, y: 500}
+];
+let currentRespawnIndex = 0;
 let score = 0;
 let loopCount = 0;
 let lastTime = 0;
@@ -58,13 +82,22 @@ function clamp(value, min, max) {
 }
 
 function distance(a, b) {
-    return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
+    return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
 function normalizeAngle(angle) {
     while (angle < 0) angle += 2 * Math.PI;
     while (angle >= 2 * Math.PI) angle -= 2 * Math.PI;
     return angle;
+}
+
+function collidesWithWall(entityX, entityY, radius = 10) {
+    return walls.some(wall => (
+        entityX + radius > wall.x &&
+        entityX - radius < wall.x + wall.w &&
+        entityY + radius > wall.y &&
+        entityY - radius < wall.y + wall.h
+    ));
 }
 
 // Update function
@@ -101,6 +134,18 @@ function update(deltaTime) {
     player.vy = moveY * speed;
     player.x += player.vx * deltaTime;
     player.y += player.vy * deltaTime;
+
+    // Wall collision for player
+    walls.forEach(wall => {
+        if (player.x + 10 > wall.x && player.x - 10 < wall.x + wall.w &&
+            player.y + 10 > wall.y && player.y - 10 < wall.y + wall.h) {
+            // Push back
+            if (player.vx > 0) player.x = wall.x - 10;
+            else if (player.vx < 0) player.x = wall.x + wall.w + 10;
+            if (player.vy > 0) player.y = wall.y - 10;
+            else if (player.vy < 0) player.y = wall.y + wall.h + 10;
+        }
+    });
 
     // Clamp to arena
     player.x = clamp(player.x, ARENA_LEFT, ARENA_RIGHT);
@@ -148,7 +193,29 @@ function update(deltaTime) {
                 });
             }
             clone.index++;
+            return;
         }
+
+        const dx = player.x - clone.x;
+        const dy = player.y - clone.y;
+        const dist = Math.hypot(dx, dy);
+
+        if (dist > 0) {
+            clone.dir = Math.atan2(dy, dx);
+            const step = Math.min(CLONE_SEARCH_SPEED * deltaTime, dist);
+            const nextX = clone.x + Math.cos(clone.dir) * step;
+            const nextY = clone.y + Math.sin(clone.dir) * step;
+
+            if (!collidesWithWall(nextX, clone.y)) {
+                clone.x = nextX;
+            }
+            if (!collidesWithWall(clone.x, nextY)) {
+                clone.y = nextY;
+            }
+        }
+
+        clone.x = clamp(clone.x, ARENA_LEFT, ARENA_RIGHT);
+        clone.y = clamp(clone.y, ARENA_TOP, ARENA_BOTTOM);
     });
 
     // Update bullets
@@ -163,13 +230,31 @@ function update(deltaTime) {
         }
     });
 
+    // Update moving hazards
+    hazards.forEach(hazard => {
+        if (hazard.type === 'moving') {
+            hazard.x += hazard.vx * deltaTime;
+            hazard.y += hazard.vy * deltaTime;
+            if (hazard.vx !== 0) {
+                if (hazard.x <= hazard.minX || hazard.x >= hazard.maxX) {
+                    hazard.vx = -hazard.vx;
+                }
+            }
+            if (hazard.vy !== 0) {
+                if (hazard.y <= hazard.minY || hazard.y >= hazard.maxY) {
+                    hazard.vy = -hazard.vy;
+                }
+            }
+        }
+    });
+
     // Check collisions
     bullets.forEach((bullet, i) => {
         if (bullet.owner === 'clone' && distance(bullet, player) < 10) {
             // Player takes damage
             player.hp--;
             if (player.hp <= 0) {
-                die();
+                die(player.recording);
             }
             bullets.splice(i, 1);
         } else if (bullet.owner === 'player') {
@@ -189,12 +274,12 @@ function update(deltaTime) {
             // Player takes damage from contact
             player.hp--;
             if (player.hp <= 0) {
-                die();
+                die(player.recording);
             }
             // Push player away slightly
             const dx = player.x - clone.x;
             const dy = player.y - clone.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
+            const dist = Math.hypot(dx, dy);
             if (dist > 0) {
                 player.x += (dx / dist) * 5;
                 player.y += (dy / dist) * 5;
@@ -208,12 +293,12 @@ function update(deltaTime) {
             // Player takes damage from hazard
             player.hp--;
             if (player.hp <= 0) {
-                die();
+                die(player.recording);
             }
             // Push player away
             const dx = player.x - hazard.x;
             const dy = player.y - hazard.y;
-            const dist = Math.sqrt(dx * dx + dy * dy);
+            const dist = Math.hypot(dx, dy);
             if (dist > 0) {
                 player.x += (dx / dist) * 5;
                 player.y += (dy / dist) * 5;
@@ -226,21 +311,26 @@ function update(deltaTime) {
 }
 
 // Die function
-function die() {
-    // Create clone
+function die(recording) {
+    // Create clone at current player position (death position)
     if (clones.length < MAX_CLONES) {
+        const firstState = recording[0];
         clones.push({
-            recording: [...player.recording],
+            recording: [...recording],
             index: 0,
-            x: player.recording[0].x,
-            y: player.recording[0].y,
-            dir: player.recording[0].dir
+            x: player.x,
+            y: player.y,
+            dir: firstState ? firstState.dir : player.dir,
+            vx: 0,
+            vy: 0
         });
     }
+    // Respawn player at next safe location
+    player.x = respawnPoints[currentRespawnIndex].x;
+    player.y = respawnPoints[currentRespawnIndex].y;
+    currentRespawnIndex = (currentRespawnIndex + 1) % respawnPoints.length;
     // Reset player
-    player.x = width / 2;
-    player.y = height / 2;
-    player.hp = 3;
+    player.hp = 2;
     player.recording = [];
     loopCount++;
 }
@@ -253,6 +343,12 @@ function draw() {
     ctx.strokeStyle = 'white';
     ctx.lineWidth = 2;
     ctx.strokeRect(ARENA_LEFT, ARENA_TOP, ARENA_RIGHT - ARENA_LEFT, ARENA_BOTTOM - ARENA_TOP);
+
+    // Draw walls
+    ctx.fillStyle = 'gray';
+    walls.forEach(wall => {
+        ctx.fillRect(wall.x, wall.y, wall.w, wall.h);
+    });
 
     // Draw hazards
     ctx.fillStyle = 'darkred';
