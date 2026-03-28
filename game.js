@@ -26,11 +26,17 @@ let player = {
     attacking: false,
     dashing: false,
     dashTime: 0,
-    attackCooldown: 0
+    attackCooldown: 0,
+    hp: 3
 };
 
 let clones = [];
 let bullets = [];
+let hazards = [
+    {x: 200, y: 200, radius: 15},
+    {x: 600, y: 300, radius: 15},
+    {x: 400, y: 500, radius: 15}
+];
 let score = 0;
 let loopCount = 0;
 let lastTime = 0;
@@ -160,8 +166,11 @@ function update(deltaTime) {
     // Check collisions
     bullets.forEach((bullet, i) => {
         if (bullet.owner === 'clone' && distance(bullet, player) < 10) {
-            // Player dies
-            die();
+            // Player takes damage
+            player.hp--;
+            if (player.hp <= 0) {
+                die();
+            }
             bullets.splice(i, 1);
         } else if (bullet.owner === 'player') {
             clones.forEach((clone, j) => {
@@ -171,6 +180,44 @@ function update(deltaTime) {
                     bullets.splice(i, 1);
                 }
             });
+        }
+    });
+
+    // Check clone contact
+    clones.forEach(clone => {
+        if (distance(clone, player) < 20) {
+            // Player takes damage from contact
+            player.hp--;
+            if (player.hp <= 0) {
+                die();
+            }
+            // Push player away slightly
+            const dx = player.x - clone.x;
+            const dy = player.y - clone.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > 0) {
+                player.x += (dx / dist) * 5;
+                player.y += (dy / dist) * 5;
+            }
+        }
+    });
+
+    // Check hazard contact
+    hazards.forEach(hazard => {
+        if (distance(hazard, player) < hazard.radius + 10) {
+            // Player takes damage from hazard
+            player.hp--;
+            if (player.hp <= 0) {
+                die();
+            }
+            // Push player away
+            const dx = player.x - hazard.x;
+            const dy = player.y - hazard.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > 0) {
+                player.x += (dx / dist) * 5;
+                player.y += (dy / dist) * 5;
+            }
         }
     });
 
@@ -193,6 +240,7 @@ function die() {
     // Reset player
     player.x = width / 2;
     player.y = height / 2;
+    player.hp = 3;
     player.recording = [];
     loopCount++;
 }
@@ -205,6 +253,14 @@ function draw() {
     ctx.strokeStyle = 'white';
     ctx.lineWidth = 2;
     ctx.strokeRect(ARENA_LEFT, ARENA_TOP, ARENA_RIGHT - ARENA_LEFT, ARENA_BOTTOM - ARENA_TOP);
+
+    // Draw hazards
+    ctx.fillStyle = 'darkred';
+    hazards.forEach(hazard => {
+        ctx.beginPath();
+        ctx.arc(hazard.x, hazard.y, hazard.radius, 0, 2 * Math.PI);
+        ctx.fill();
+    });
 
     // Draw player
     ctx.fillStyle = 'blue';
@@ -244,6 +300,7 @@ function draw() {
     // Update UI
     document.getElementById('score').textContent = `Score: ${Math.floor(score)}`;
     document.getElementById('loop-count').textContent = `Loop: ${loopCount}`;
+    document.getElementById('health').textContent = `Health: ${player.hp}`;
 }
 
 // Game loop

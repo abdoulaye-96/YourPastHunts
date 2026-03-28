@@ -9,6 +9,11 @@ A fast-paced action survival game based on a time-loop mechanic where you fight 
 - Dash with Shift
 - Survive as long as possible against increasing numbers of clones
 - Each death creates a new clone that replays your past run
+- **Death conditions**: 
+  - Hit by clone bullets (lose 1 HP)
+  - Direct contact with clones (lose 1 HP)
+  - Touching environmental hazards (lose 1 HP)
+  - Player has 3 HP total
 
 ## How to Play
 
