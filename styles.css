@@ -14,6 +14,31 @@ body {
     position: relative;
 }
 
+#start-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.75);
+    z-index: 10;
+}
+
+#start-button {
+    padding: 14px 28px;
+    font-size: 20px;
+    font-weight: 700;
+    color: #fff;
+    background: #c41f1f;
+    border: 2px solid #fff;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+#start-button:hover {
+    background: #e02e2e;
+}
+
 #game-canvas {
     border: 2px solid white;
     background-color: #111;

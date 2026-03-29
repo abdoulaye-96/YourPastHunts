@@ -2,6 +2,8 @@ const canvas = document.getElementById('game-canvas');
 const ctx = canvas.getContext('2d');
 const width = canvas.width;
 const height = canvas.height;
+const startOverlay = document.getElementById('start-overlay');
+const startButton = document.getElementById('start-button');
 
 // Constants
 const ARENA_LEFT = 50;
@@ -66,6 +68,21 @@ let score = 0;
 let loopCount = 0;
 let lastTime = 0;
 let keys = {};
+let audioUnlocked = false;
+let gameStarted = false;
+
+const sounds = {
+    background: new Audio('deathloop.mp3'),
+    obstacleHit: new Audio('OBSTACLE.wav'),
+    cloneHit: new Audio('CLONE.wav'),
+    playerShot: new Audio('TIR.wav')
+};
+
+sounds.background.loop = true;
+sounds.background.volume = 0.45;
+sounds.obstacleHit.volume = 0.7;
+sounds.cloneHit.volume = 0.75;
+sounds.playerShot.volume = 0.8;
 
 // Input handling
 document.addEventListener('keydown', (e) => {
@@ -76,6 +93,55 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('keyup', (e) => {
     keys[e.code] = false;
 });
+
+function playEffect(sound) {
+    if (!audioUnlocked) {
+        return;
+    }
+
+    sound.currentTime = 0;
+    const playPromise = sound.play();
+    if (typeof playPromise?.catch === 'function') {
+        playPromise.catch(() => {});
+    }
+}
+
+function startBackgroundMusic() {
+    const playPromise = sounds.background.play();
+    if (typeof playPromise?.then === 'function') {
+        playPromise
+            .then(() => {
+                audioUnlocked = true;
+            })
+            .catch(() => {
+                audioUnlocked = false;
+            });
+    }
+}
+
+function unlockAudio() {
+    if (audioUnlocked) {
+        return;
+    }
+
+    audioUnlocked = true;
+    startBackgroundMusic();
+}
+
+function startGame() {
+    if (gameStarted) {
+        return;
+    }
+
+    gameStarted = true;
+    if (startOverlay) {
+        startOverlay.style.display = 'none';
+    }
+
+    unlockAudio();
+    lastTime = performance.now();
+    requestAnimationFrame(gameLoop);
+}
 
 // Utility functions
 function clamp(value, min, max) {
@@ -261,6 +327,7 @@ function update(deltaTime) {
     if (keys['Space'] && player.attackCooldown <= 0) {
         player.attacking = true;
         player.attackCooldown = ATTACK_COOLDOWN;
+        playEffect(sounds.playerShot);
         bullets.push({
             x: player.x,
             y: player.y,
@@ -374,6 +441,7 @@ function update(deltaTime) {
     // Check clone contact
     clones.forEach(clone => {
         if (distance(clone, player) < ENTITY_RADIUS * 2) {
+            playEffect(sounds.cloneHit);
             // Player takes damage from contact
             player.hp--;
             if (player.hp <= 0) {
@@ -393,6 +461,7 @@ function update(deltaTime) {
     // Check hazard contact
     hazards.forEach(hazard => {
         if (distance(hazard, player) < hazard.radius + 10) {
+            playEffect(sounds.obstacleHit);
             // Player takes damage from hazard
             player.hp--;
             if (player.hp <= 0) {
@@ -514,4 +583,6 @@ function gameLoop(currentTime) {
 }
 
 // Start game
-requestAnimationFrame(gameLoop);
+if (startButton) {
+    startButton.addEventListener('click', startGame);
+}
