@@ -72,10 +72,10 @@ let audioUnlocked = false;
 let gameStarted = false;
 
 const sounds = {
-    background: new Audio('deathloop.mp3'),
-    obstacleHit: new Audio('OBSTACLE.wav'),
-    cloneHit: new Audio('CLONE.wav'),
-    playerShot: new Audio('TIR.wav')
+    background: new Audio('media/deathloop.mp3'),
+    obstacleHit: new Audio('media/obstacle.wav'),
+    cloneHit: new Audio('media/clone.wav'),
+    playerShot: new Audio('media/tir.wav')
 };
 
 sounds.background.loop = true;
