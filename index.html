@@ -12,11 +12,19 @@
         <div id="start-overlay">
             <button id="start-button" type="button">Start Game</button>
         </div>
+        <div id="game-over-overlay" style="display: none;">
+            <h1 class="game-over-text">GAME OVER</h1>
+            <button id="restart-button" type="button">Restart Game</button>
+        </div>
         <div id="ui">
             <div id="score">Score: 0</div>
             <div id="loop-count">Loop: 0</div>
-            <div id="health">Health: 2</div>
+            <div id="time">Time: 10</div>
+            <div id="lives">Lives: 5</div>
+            <button id="pause-button" type="button" disabled>Pause</button>
             <div id="instructions">WASD: Move, Space: Attack, Shift: Dash</div>
+        <div id="glitch-overlay" style="display: none;">
+            <h1 class="glitch-text">YOUR PAST IS GETTING STRONGER</h1>
         </div>
     </div>
     <script src="game.js"></script>

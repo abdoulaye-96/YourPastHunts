@@ -4,6 +4,10 @@ const width = canvas.width;
 const height = canvas.height;
 const startOverlay = document.getElementById('start-overlay');
 const startButton = document.getElementById('start-button');
+const pauseButton = document.getElementById('pause-button');
+const gameOverOverlay = document.getElementById('game-over-overlay');
+const restartButton = document.getElementById('restart-button');
+const glitchOverlay = document.getElementById('glitch-overlay');
 
 // Constants
 const ARENA_LEFT = 50;
@@ -14,9 +18,9 @@ const PLAYER_SPEED = 200; // pixels per second
 const DASH_SPEED = 400;
 const BULLET_SPEED = 300;
 const BULLET_LIFETIME = 2; // seconds
-const MAX_CLONES = 5;
+let MAX_CLONES = 2;
 const ATTACK_COOLDOWN = 0.5; // seconds
-const CLONE_SEARCH_SPEED = 140;
+let CLONE_SEARCH_SPEED = 100;
 const ENTITY_RADIUS = 10;
 
 // Game state
@@ -31,7 +35,7 @@ let player = {
     dashing: false,
     dashTime: 0,
     attackCooldown: 0,
-    hp: 2
+    hp: 5 // Lives
 };
 
 let clones = [];
@@ -42,15 +46,9 @@ let hazards = [
     {x: 150, y: 450, radius: 20, type: 'static'},
     {x: 650, y: 450, radius: 20, type: 'static'},
     {x: 400, y: 200, radius: 15, type: 'static'},
-    {x: 400, y: 400, radius: 15, type: 'static'},
-    {x: 200, y: 300, radius: 15, type: 'static'},
-    {x: 600, y: 300, radius: 15, type: 'static'},
-    {x: 300, y: 100, radius: 18, type: 'static'},
-    {x: 500, y: 500, radius: 18, type: 'static'},
     {x: 100, y: 250, radius: 12, type: 'moving', vx: 50, vy: 0, minX: 100, maxX: 300},
     {x: 700, y: 350, radius: 12, type: 'moving', vx: -50, vy: 0, minX: 500, maxX: 700},
-    {x: 250, y: 550, radius: 12, type: 'moving', vx: 0, vy: -30, minY: 350, maxY: 550},
-    {x: 550, y: 50, radius: 12, type: 'moving', vx: 0, vy: 30, minY: 50, maxY: 250}
+    {x: 250, y: 550, radius: 12, type: 'moving', vx: 0, vy: -30, minY: 350, maxY: 550}
 ];
 let walls = [
     {x: 350, y: 250, w: 100, h: 20, type: 'moving', vx: 70, vy: 0, minX: 260, maxX: 440},
@@ -66,16 +64,31 @@ let respawnPoints = [
 let currentRespawnIndex = 0;
 let score = 0;
 let loopCount = 0;
+let timeLeft = 10;
+const MAX_TIME = 10;
+let targetZone = {x: 400, y: 300, radius: 25};
+let survivalTime = 0;
+let currentLevel = 1;
+let glitchTimer = 0;
+
+function moveTargetZone() {
+    targetZone.x = ARENA_LEFT + Math.random() * (ARENA_RIGHT - ARENA_LEFT - targetZone.radius * 2) + targetZone.radius;
+    targetZone.y = ARENA_TOP + Math.random() * (ARENA_BOTTOM - ARENA_TOP - targetZone.radius * 2) + targetZone.radius;
+}
+
 let lastTime = 0;
 let keys = {};
 let audioUnlocked = false;
 let gameStarted = false;
+let gamePaused = false;
 
 const sounds = {
     background: new Audio('media/deathloop.mp3'),
     obstacleHit: new Audio('media/obstacle.wav'),
     cloneHit: new Audio('media/clone.wav'),
-    playerShot: new Audio('media/tir.wav')
+    playerShot: new Audio('media/tir.wav'),
+    cloneShot: new Audio('media/TIR_ENNEMI.wav'),
+    gameOver: new Audio('media/gameover.wav')
 };
 
 sounds.background.loop = true;
@@ -83,6 +96,8 @@ sounds.background.volume = 0.45;
 sounds.obstacleHit.volume = 0.7;
 sounds.cloneHit.volume = 0.75;
 sounds.playerShot.volume = 0.8;
+sounds.cloneShot.volume = 0.8;
+sounds.gameOver.volume = 0.8;
 
 // Input handling
 document.addEventListener('keydown', (e) => {
@@ -137,10 +152,34 @@ function startGame() {
     if (startOverlay) {
         startOverlay.style.display = 'none';
     }
+    if (pauseButton) {
+        pauseButton.disabled = false;
+        pauseButton.textContent = 'Pause';
+    }
 
     unlockAudio();
     lastTime = performance.now();
     requestAnimationFrame(gameLoop);
+}
+
+function togglePause() {
+    if (!gameStarted) {
+        return;
+    }
+
+    gamePaused = !gamePaused;
+    if (pauseButton) {
+        pauseButton.textContent = gamePaused ? 'Resume' : 'Pause';
+    }
+
+    if (gamePaused) {
+        sounds.background.pause();
+    } else {
+        lastTime = performance.now();
+        if (audioUnlocked) {
+            startBackgroundMusic();
+        }
+    }
 }
 
 // Utility functions
@@ -355,6 +394,7 @@ function update(deltaTime) {
             clone.y = state.y;
             clone.dir = state.dir;
             if (state.attacking) {
+                playEffect(sounds.cloneShot);
                 bullets.push({
                     x: clone.x,
                     y: clone.y,
@@ -424,7 +464,7 @@ function update(deltaTime) {
             // Player takes damage
             player.hp--;
             if (player.hp <= 0) {
-                die(player.recording);
+                gameOver();
             }
             bullets.splice(i, 1);
         } else if (bullet.owner === 'player') {
@@ -445,15 +485,16 @@ function update(deltaTime) {
             // Player takes damage from contact
             player.hp--;
             if (player.hp <= 0) {
-                die(player.recording);
-            }
-            // Push player away slightly
-            const dx = player.x - clone.x;
-            const dy = player.y - clone.y;
-            const dist = Math.hypot(dx, dy);
-            if (dist > 0) {
-                player.x += (dx / dist) * 5;
-                player.y += (dy / dist) * 5;
+                gameOver();
+            } else {
+                // Push player away slightly
+                const dx = player.x - clone.x;
+                const dy = player.y - clone.y;
+                const dist = Math.hypot(dx, dy);
+                if (dist > 0) {
+                    player.x += (dx / dist) * 15;
+                    player.y += (dy / dist) * 15;
+                }
             }
         }
     });
@@ -462,28 +503,66 @@ function update(deltaTime) {
     hazards.forEach(hazard => {
         if (distance(hazard, player) < hazard.radius + 10) {
             playEffect(sounds.obstacleHit);
-            // Player takes damage from hazard
+            // Player takes damage from hazard and dies locally (spawns clone)
             player.hp--;
-            if (player.hp <= 0) {
-                die(player.recording);
-            }
-            // Push player away
-            const dx = player.x - hazard.x;
-            const dy = player.y - hazard.y;
-            const dist = Math.hypot(dx, dy);
-            if (dist > 0) {
-                player.x += (dx / dist) * 5;
-                player.y += (dy / dist) * 5;
-            }
+            dieFromObstacle(player.recording);
         }
     });
 
-    // Update score
-    score += deltaTime;
+    // Check target zone contact
+    if (distance(player, targetZone) < targetZone.radius + ENTITY_RADIUS) {
+        score += 10;
+        timeLeft = MAX_TIME;
+        moveTargetZone();
+    }
+
+    // Update timer
+    timeLeft -= deltaTime;
+    if (timeLeft <= 0) {
+        gameOver();
+    }
+
+    // Update Survival Level
+    survivalTime += deltaTime;
+    let newLevel = Math.floor(survivalTime / 20) + 1;
+    if (newLevel > currentLevel) {
+        currentLevel = newLevel;
+        triggerLevelUp();
+    }
+
+    // Glitch timer
+    if (glitchTimer > 0) {
+        glitchTimer -= deltaTime;
+        if (glitchTimer <= 0 && glitchOverlay) {
+            glitchOverlay.style.display = 'none';
+        }
+    }
 }
 
-// Die function
-function die(recording) {
+function triggerLevelUp() {
+    if (glitchOverlay) {
+        glitchOverlay.style.display = 'flex';
+        glitchTimer = 2.0; 
+        playEffect(sounds.obstacleHit);
+    }
+    
+    MAX_CLONES = Math.min(6, 1 + currentLevel);
+    CLONE_SEARCH_SPEED = 100 + (currentLevel * 20);
+    
+    hazards.forEach(h => {
+        if (h.type === 'moving') {
+            h.vx = h.vx > 0 ? h.vx + 10 : (h.vx < 0 ? h.vx - 10 : 0);
+            h.vy = h.vy > 0 ? h.vy + 10 : (h.vy < 0 ? h.vy - 10 : 0);
+        }
+    });
+}
+
+// Die function (from obstacle)
+function dieFromObstacle(recording) {
+    if (player.hp <= 0) {
+        gameOver();
+        return;
+    }
     // Create clone at current player position (death position)
     if (clones.length < MAX_CLONES) {
         const firstState = recording[0];
@@ -501,10 +580,50 @@ function die(recording) {
     player.x = respawnPoints[currentRespawnIndex].x;
     player.y = respawnPoints[currentRespawnIndex].y;
     currentRespawnIndex = (currentRespawnIndex + 1) % respawnPoints.length;
-    // Reset player
-    player.hp = 2;
+    // Reset player recording
     player.recording = [];
     loopCount++;
+}
+
+// Game Over reset
+function gameOver() {
+    gameStarted = false;
+    if (gameOverOverlay) {
+        gameOverOverlay.style.display = 'flex';
+    }
+    sounds.background.pause();
+    sounds.background.currentTime = 0;
+    playEffect(sounds.gameOver);
+}
+
+function restartGame() {
+    player.hp = 5;
+    player.recording = [];
+    clones = [];
+    bullets = [];
+    score = 0;
+    loopCount = 0;
+    timeLeft = MAX_TIME;
+    survivalTime = 0;
+    currentLevel = 1;
+    MAX_CLONES = 2;
+    CLONE_SEARCH_SPEED = 100;
+    moveTargetZone();
+    player.x = respawnPoints[0].x;
+    player.y = respawnPoints[0].y;
+    currentRespawnIndex = 1;
+    
+    if (gameOverOverlay) {
+        gameOverOverlay.style.display = 'none';
+    }
+    
+    gameStarted = true;
+    lastTime = performance.now();
+    requestAnimationFrame(gameLoop);
+    
+    if (audioUnlocked) {
+        startBackgroundMusic();
+    }
 }
 
 // Draw function
@@ -529,6 +648,15 @@ function draw() {
         ctx.arc(hazard.x, hazard.y, hazard.radius, 0, 2 * Math.PI);
         ctx.fill();
     });
+
+    // Draw target zone
+    ctx.fillStyle = 'rgba(0, 255, 0, 0.4)';
+    ctx.beginPath();
+    ctx.arc(targetZone.x, targetZone.y, targetZone.radius, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.strokeStyle = '#0f0';
+    ctx.lineWidth = 2;
+    ctx.stroke();
 
     // Draw player
     ctx.fillStyle = 'blue';
@@ -567,12 +695,29 @@ function draw() {
 
     // Update UI
     document.getElementById('score').textContent = `Score: ${Math.floor(score)}`;
-    document.getElementById('loop-count').textContent = `Loop: ${loopCount}`;
-    document.getElementById('health').textContent = `Health: ${player.hp}`;
+    document.getElementById('loop-count').textContent = `Level: ${currentLevel}`;
+    const timeElement = document.getElementById('time');
+    if (timeElement) {
+        timeElement.textContent = `Time: ${Math.ceil(timeLeft)}`;
+        if (timeLeft <= 5) {
+            timeElement.style.color = 'red';
+        } else {
+            timeElement.style.color = 'white';
+        }
+    }
+    document.getElementById('lives').textContent = `Lives: ${player.hp}`;
 }
 
 // Game loop
 function gameLoop(currentTime) {
+    if (!gameStarted) return;
+    
+    if (gamePaused) {
+        lastTime = currentTime;
+        requestAnimationFrame(gameLoop);
+        return;
+    }
+
     const deltaTime = (currentTime - lastTime) / 1000;
     lastTime = currentTime;
 
@@ -585,4 +730,12 @@ function gameLoop(currentTime) {
 // Start game
 if (startButton) {
     startButton.addEventListener('click', startGame);
+}
+
+if (pauseButton) {
+    pauseButton.addEventListener('click', togglePause);
+}
+
+if (restartButton) {
+    restartButton.addEventListener('click', restartGame);
 }
